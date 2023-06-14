@@ -73,17 +73,18 @@ template <class S> class dynamic_section_accessor_template
     bool get_entry( Elf_Xword    index,
                     Elf_Xword&   tag,
                     Elf_Xword&   value,
-                    std::string& str ) const
+                    std::string& str,
+					Elf64_Dyn** pdyn = nullptr) const
     {
         if ( index >= get_entries_num() ) { // Is index valid
             return false;
         }
 
         if ( elf_file.get_class() == ELFCLASS32 ) {
-            generic_get_entry_dyn<Elf32_Dyn>( index, tag, value );
+            generic_get_entry_dyn<Elf32_Dyn>( index, tag, value, nullptr);
         }
         else {
-            generic_get_entry_dyn<Elf64_Dyn>( index, tag, value );
+            generic_get_entry_dyn<Elf64_Dyn>( index, tag, value, pdyn);
         }
 
         // If the tag has a string table reference - prepare the string
@@ -94,6 +95,10 @@ template <class S> class dynamic_section_accessor_template
             const char* result = strsec.get_string( (Elf_Word)value );
             if ( nullptr == result ) {
                 str.clear();
+				if(pdyn)
+				{
+					*pdyn = nullptr;
+				}
                 return false;
             }
             str = result;
@@ -137,7 +142,8 @@ template <class S> class dynamic_section_accessor_template
     template <class T>
     void generic_get_entry_dyn( Elf_Xword  index,
                                 Elf_Xword& tag,
-                                Elf_Xword& value ) const
+                                Elf_Xword& value,
+								T** pdyn) const
     {
         const endianess_convertor& convertor = elf_file.get_convertor();
 
@@ -154,6 +160,10 @@ template <class S> class dynamic_section_accessor_template
         const T* pEntry = reinterpret_cast<const T*>(
             dynamic_section->get_data() +
             index * dynamic_section->get_entry_size() );
+		if(pdyn)
+		{
+			*pdyn = const_cast<T* >(pEntry);
+		}
         tag = convertor( pEntry->d_tag );
         switch ( tag ) {
         case DT_NULL:

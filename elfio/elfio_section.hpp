@@ -51,6 +51,7 @@ class section
     ELFIO_GET_ACCESS_DECL( Elf64_Off, offset );
 
     virtual const char* get_data() const                                   = 0;
+    virtual char* get_data()			                                   = 0;
     virtual void        set_data( const char* raw_data, Elf_Word size )    = 0;
     virtual void        set_data( const std::string& data )                = 0;
     virtual void        append_data( const char* raw_data, Elf_Word size ) = 0;
@@ -122,6 +123,14 @@ template <class T> class section_impl : public section
 
     //------------------------------------------------------------------------------
     const char* get_data() const override
+    {
+        if ( is_lazy ) {
+            load_data();
+        }
+        return data.get();
+    }
+
+	char* get_data() override
     {
         if ( is_lazy ) {
             load_data();

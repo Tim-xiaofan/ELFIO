@@ -71,17 +71,18 @@ template <class S> class symbol_section_accessor_template
                      unsigned char& bind,
                      unsigned char& type,
                      Elf_Half&      section_index,
-                     unsigned char& other ) const
+                     unsigned char& other,
+					 Elf64_Sym** psym = nullptr) const
     {
         bool ret = false;
 
         if ( elf_file.get_class() == ELFCLASS32 ) {
             ret = generic_get_symbol<Elf32_Sym>( index, name, value, size, bind,
-                                                 type, section_index, other );
+                                                 type, section_index, other, nullptr);
         }
         else {
             ret = generic_get_symbol<Elf64_Sym>( index, name, value, size, bind,
-                                                 type, section_index, other );
+                                                 type, section_index, other, psym);
         }
 
         return ret;
@@ -168,6 +169,26 @@ template <class S> class symbol_section_accessor_template
         }
 
         return false;
+    }
+
+	const Elf64_Sym* get_elf64_sym(Elf_Xword index) const
+    {
+        if ( elf_file.get_class() == ELFCLASS64 ) {
+			return generic_get_elfn_sym<Elf64_Sym>(index);
+        }
+        else {
+			return nullptr;
+        }
+    }
+
+	Elf64_Sym* get_elf64_sym(Elf_Xword index)
+    {
+        if ( elf_file.get_class() == ELFCLASS64 ) {
+			return generic_get_elfn_sym<Elf64_Sym>(index);
+        }
+        else {
+			return nullptr;
+        }
     }
 
     //------------------------------------------------------------------------------
@@ -434,7 +455,8 @@ template <class S> class symbol_section_accessor_template
                              unsigned char& bind,
                              unsigned char& type,
                              Elf_Half&      section_index,
-                             unsigned char& other ) const
+                             unsigned char& other,
+							 T** psym) const
     {
         bool ret = false;
 
@@ -460,12 +482,48 @@ template <class S> class symbol_section_accessor_template
             type          = ELF_ST_TYPE( pSym->st_info );
             section_index = convertor( pSym->st_shndx );
             other         = pSym->st_other;
+			if(psym)
+			{
+				*psym = const_cast<T*>(pSym);
+			}
 
             ret = true;
         }
 
         return ret;
     }
+
+	template <class T>
+    const T* generic_get_elfn_sym( Elf_Xword index) const
+    {
+		if ( nullptr != symbol_section->get_data() &&
+             index < get_symbols_num() ) {
+            const T* pSym = reinterpret_cast<const T*>(
+                symbol_section->get_data() +
+                index * symbol_section->get_entry_size() );
+			return pSym;
+		}
+		else
+		{
+			return nullptr;
+		}
+	}
+
+	template <class T>
+    T* generic_get_elfn_sym( Elf_Xword index)
+    {
+		if ( nullptr != symbol_section->get_data() &&
+             index < get_symbols_num() ) {
+            T* pSym = reinterpret_cast<T*>(
+                symbol_section->get_data() +
+                index * symbol_section->get_entry_size() );
+			return pSym;
+		}
+		else
+		{
+			return nullptr;
+		}
+	}
 
     //------------------------------------------------------------------------------
     template <class T>

@@ -32,6 +32,9 @@ THE SOFTWARE.
 #include <vector>
 #include <deque>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 #include <elfio/elf_types.hpp>
 #include <elfio/elfio_version.hpp>
@@ -60,6 +63,9 @@ THE SOFTWARE.
     }
 
 namespace ELFIO {
+
+class elfio;
+using moved_section_list = std::vector<std::pair<section*, Elf64_Addr>>;
 
 //------------------------------------------------------------------------------
 class elfio
@@ -368,6 +374,57 @@ class elfio
 
         return errors;
     }
+
+	moved_section_list section_insert_data(Elf_Half index, size_t size)
+	{
+		moved_section_list moved_sections;
+		if(index < 0 || index >= sections.size())
+		{
+			throw std::out_of_range("index = " + std::to_string(index));
+		}
+
+		if((get_class()) != ELFCLASS64)
+		{
+			throw std::invalid_argument("only ELFCLASS64");
+		}
+		section* inserted_sec = sections[index];
+		inserted_sec->set_size(inserted_sec->get_size());
+		
+		/** move sections after inserted_sec*/
+		Elf64_Addr pre_end = inserted_sec->get_size() + inserted_sec->get_address() + size;
+		for(Elf_Half i = index + 1; i < sections.size(); ++i)
+		{
+			section* cur_sec = sections[i];
+			if(pre_end <= cur_sec->get_offset())
+			{
+				break;
+			}
+			else
+			{
+				std::cout << __FILE__ << ":" << __LINE__ << ": INFO original: sec->get_address()=" << cur_sec->get_address()
+					<< ", sec->get_name()=" << cur_sec->get_name()  
+					<< ", index = " << i << std::endl;
+				std::cout << __FILE__ << ":" << __LINE__ << ": pre_end=" << pre_end << std::endl;
+				Elf_Xword addr_align = cur_sec->get_addr_align();
+				std::cout << __FILE__ << ":" << __LINE__ << ": addr_align=" << addr_align << std::endl;
+				Elf64_Off pad_bytes = ((pre_end % addr_align) == 0) ? 0 : (addr_align - pre_end % addr_align);
+				std::cout << __FILE__ << ":" << __LINE__ << ": pad_bytes=" << pad_bytes << std::endl;
+				Elf64_Addr new_addr = pre_end + pad_bytes; 
+				moved_sections.emplace_back(cur_sec, new_addr);
+				pre_end += pad_bytes;
+				std::cout << __FILE__ << ":" << __LINE__ << ": INFO new: sec->get_address()=" << new_addr
+					<< ", sec->get_name()=" << cur_sec->get_name()  
+					<< ", index = " << i << std::endl;
+			}
+		}
+		return moved_sections;
+	}
+
+	template<typename Unary>
+	void traverse_elf64syms(Unary op);
+
+	template<typename Unary>
+	void traverse_elf64ProgramTable(Unary op);
 
   private:
     //------------------------------------------------------------------------------
@@ -817,6 +874,7 @@ class elfio
             // Write segment's data
             if ( !write_segment_data( seg, section_generated, segment_memory,
                                       segment_filesize, seg_start_pos ) ) {
+				std::cout << __FILE__ << ":" << __LINE__ <<": write_segment_data: failed\n";
                 return false;
             }
 
@@ -853,6 +911,10 @@ class elfio
                              Elf_Xword&         segment_filesize,
                              const Elf_Xword&   seg_start_pos )
     {
+		if((seg->get_virtual_address()) == 4096)
+		{
+			std::cout << "seg@" << seg << std::endl;
+		}
         for ( Elf_Half j = 0; j < seg->get_sections_num(); ++j ) {
             Elf_Half index = seg->get_section_index_at( j );
 
@@ -874,11 +936,25 @@ class elfio
                 Elf64_Off req_offset =
                     sec->get_address() - seg->get_virtual_address();
                 Elf64_Off cur_offset = current_file_pos - seg_start_pos;
-                if ( req_offset < cur_offset ) {
-                    // something has gone awfully wrong, abort!
-                    // section_align would turn out negative, seeking backwards and overwriting previous data
-                    return false;
-                }
+
+				if((seg->get_virtual_address()) == 4096)
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << ": INFO sec->get_address()=" << sec->get_address()
+						<< ", seg->get_virtual_address()=" << seg->get_virtual_address() 
+						<< ", sec->get_name()=" << sec->get_name()  
+						<< ", index = " << index << std::endl;
+					std::cout << __FILE__ << ":" << __LINE__ << ": INFO current_file_pos=" << current_file_pos << ", seg_start_pos=" << seg_start_pos << std::endl;
+					std::cout << __FILE__ << ":" << __LINE__ << ": INFO req_offset=" << req_offset << ", cur_offset=" << cur_offset << std::endl;
+				}
+				if ( req_offset < cur_offset ) {
+					// something has gone awfully wrong, abort!
+					// section_align would turn out negative, seeking backwards and overwriting previous data
+					if((seg->get_virtual_address()) == 4096)
+					{
+						std::cout << __FILE__ << ":" << __LINE__ << ": ERROR req_offset=" << req_offset << " < cur_offset=" << cur_offset << std::endl;
+					}
+					return false;
+				}
                 section_align = req_offset - cur_offset;
             }
             else if ( !section_generated[index] &&
@@ -915,7 +991,10 @@ class elfio
             if ( section_generated[index] ) {
                 continue;
             }
-
+			if((seg->get_virtual_address()) == 4096)
+			{
+				std::cout << __FILE__ << ":" << __LINE__ << ": INFO section_align=" <<  section_align << std::endl;
+			}
             current_file_pos += section_align;
 
             // Set the section addresses when missing
@@ -929,6 +1008,10 @@ class elfio
             }
 
             if ( SHT_NOBITS != sec->get_type() ) {
+				if((seg->get_virtual_address()) == 4096)
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << ": INFO sec->get_size()=" <<  sec->get_size() << std::endl;
+				}
                 current_file_pos += sec->get_size();
             }
 
@@ -1089,7 +1172,9 @@ class elfio
     std::shared_ptr<compression_interface> compression = nullptr;
 
     Elf_Xword current_file_pos = 0;
-};
+}; // class elfio
+
+
 
 } // namespace ELFIO
 
@@ -1100,5 +1185,34 @@ class elfio
 #include <elfio/elfio_array.hpp>
 #include <elfio/elfio_modinfo.hpp>
 #include <elfio/elfio_versym.hpp>
+
+namespace ELFIO
+{
+template<typename Unary>
+void elfio::traverse_elf64syms(Unary op)
+{
+	std::vector<Elf64_Sym*> syms;
+	for ( size_t i = 0; i < sections.size(); ++i ) {
+		section* psec = sections[i];
+
+		if ( psec->get_type() == ELFIO::SHT_SYMTAB  || ELFIO::SHT_DYNSYM == psec->get_type() ) {
+			symbol_section_accessor symbols(*this, psec);
+			for ( unsigned int j = 0; j < symbols.get_symbols_num(); ++j ) {
+				Elf64_Sym* psym = symbols.get_elf64_sym(j);
+				op(psym);
+			}
+		}
+	}
+}
+
+template<typename Unary>
+void elfio::traverse_elf64ProgramTable(Unary op)
+{
+	for (size_t i = 0; i < segments.size(); ++i) {
+        op(segments[i]);
+	}
+}
+
+}
 
 #endif // ELFIO_HPP
